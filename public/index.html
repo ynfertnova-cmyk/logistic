@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能剪贴板提取工具 · 多人协作版</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --primary: #6366f1;
+    --primary-dark: #4f46e5;
+    --primary-light: #eef2ff;
+    --success: #10b981;
+    --success-light: #ecfdf5;
+    --warning: #f59e0b;
+    --warning-light: #fffbeb;
+    --danger: #ef4444;
+    --danger-light: #fef2f2;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --radius: 10px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.06);
+    --shadow: 0 2px 8px rgba(0,0,0,.08);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    color: var(--gray-800);
+    font-size: 14px;
+  }
+
+  /* ─── Header ─── */
+  header {
+    background: white;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 28px;
+    height: 58px;
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+
+  .title-block { flex: 1; }
+  .title-block h1 { font-size: 16px; font-weight: 700; color: var(--gray-900); }
+  .title-block p { font-size: 12px; color: var(--gray-400); margin-top: 1px; }
+
+  .header-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--success-light);
+    color: var(--success);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .dot-live {
+    width: 7px; height: 7px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .5; transform: scale(0.8); }
+  }
+
+  /* ─── Layout ─── */
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    background: white;
+    border-right: 1px solid var(--gray-200);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .main {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ─── Cards ─── */
+  .card {
+    background: white;
+    border-radius: var(--radius);
+    border: 1px solid var(--gray-200);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .card-header h2 {
+    font-size: 13px; font-weight: 600;
+    color: var(--gray-700); flex: 1;
+  }
+
+  .card-body { padding: 14px 16px; }
+
+  /* ─── Forms ─── */
+  label { font-size: 12px; font-weight: 500; color: var(--gray-600); display: block; margin-bottom: 5px; }
+
+  input[type=text], input[type=password], select, textarea {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1px solid var(--gray-200);
+    border-radius: 7px;
+    font-size: 13px;
+    color: var(--gray-800);
+    background: white;
+    transition: border-color .15s;
+    outline: none;
+  }
+
+  input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99,102,241,.1);
+  }
+
+  select { cursor: pointer; }
+
+  /* ─── Buttons ─── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 5px; padding: 8px 14px;
+    border: none; border-radius: 7px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all .15s;
+    text-decoration: none; white-space: nowrap;
+  }
+
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+  .btn-success { background: var(--success); color: white; }
+  .btn-success:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-outline { background: white; color: var(--gray-700); border: 1px solid var(--gray-300); }
+  .btn-outline:hover:not(:disabled) { background: var(--gray-50); border-color: var(--gray-400); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-block { width: 100%; }
+
+  /* ─── Upload Zone ─── */
+  .upload-zone {
+    border: 2px dashed var(--gray-300);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    background: var(--gray-50);
+  }
+
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+
+  .upload-zone .icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-zone p { font-size: 13px; color: var(--gray-500); }
+  .upload-zone small { font-size: 11px; color: var(--gray-400); }
+
+  .template-loaded {
+    background: var(--success-light);
+    border: 1px solid #6ee7b7;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #065f46;
+  }
+
+  /* ─── Paste Area ─── */
+  .paste-zone {
+    min-height: 130px;
+    border: 2px dashed var(--gray-300);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: text;
+    transition: all .2s;
+    background: var(--gray-50);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px;
+    position: relative;
+  }
+
+  .paste-zone.has-content {
+    background: white;
+    border-color: var(--primary);
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .paste-zone.dragover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+
+  .paste-icon { font-size: 32px; }
+  .paste-hint { font-size: 13px; color: var(--gray-400); }
+  .paste-hint kbd {
+    background: var(--gray-200); border-radius: 4px;
+    padding: 1px 6px; font-size: 11px; font-family: monospace;
+  }
+
+  .content-preview {
+    width: 100%; font-size: 12px;
+    color: var(--gray-700); line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 160px; overflow-y: auto;
+  }
+
+  .paste-tag {
+    position: absolute; top: 8px; right: 8px;
+    background: var(--primary); color: white;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 500;
+  }
+
+  /* ─── Fields Preview ─── */
+  .fields-list {
+    display: flex; flex-wrap: wrap; gap: 5px;
+    padding: 10px 0;
+  }
+
+  .field-tag {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* ─── Extracted Result ─── */
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+  }
+
+  .result-item {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 7px;
+    padding: 10px 12px;
+  }
+
+  .result-item .key {
+    font-size: 11px; font-weight: 500;
+    color: var(--gray-500); margin-bottom: 4px;
+  }
+
+  .result-item .val {
+    font-size: 13px; color: var(--gray-800);
+    font-weight: 500; word-break: break-all;
+  }
+
+  .result-item .val:empty::before {
+    content: '未识别'; color: var(--gray-300); font-weight: 400;
+  }
+
+  /* ─── Tabs ─── */
+  .tabs {
+    display: flex; gap: 2px;
+    background: var(--gray-100);
+    border-radius: 7px; padding: 3px;
+  }
+
+  .tab {
+    padding: 5px 12px; border-radius: 5px;
+    font-size: 12px; font-weight: 500;
+    color: var(--gray-500); cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+
+  .tab.active {
+    background: white; color: var(--primary);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ─── Records Table ─── */
+  .records-wrap { overflow-x: auto; }
+
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th {
+    background: var(--gray-50);
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--gray-600);
+    border-bottom: 1px solid var(--gray-200);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    color: var(--gray-700);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--gray-50); }
+
+  .badge {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 10px; font-size: 11px; font-weight: 500;
+  }
+
+  .badge-blue { background: var(--primary-light); color: var(--primary-dark); }
+  .badge-green { background: var(--success-light); color: #065f46; }
+
+  /* ─── Alerts ─── */
+  .alert {
+    padding: 10px 14px; border-radius: 7px;
+    font-size: 13px; display: flex; align-items: flex-start; gap: 8px;
+  }
+
+  .alert-info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .alert-success { background: var(--success-light); color: #065f46; border: 1px solid #6ee7b7; }
+  .alert-warning { background: var(--warning-light); color: #92400e; border: 1px solid #fcd34d; }
+  .alert-danger { background: var(--danger-light); color: #991b1b; border: 1px solid #fca5a5; }
+
+  /* ─── Loading ─── */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── Toast ─── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 10px 18px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    color: white; z-index: 9999;
+    opacity: 0; transform: translateY(12px);
+    transition: all .25s; pointer-events: none;
+    box-shadow: var(--shadow-md);
+  }
+
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.success { background: var(--success); }
+  #toast.error { background: var(--danger); }
+  #toast.info { background: var(--primary); }
+
+  /* ─── Empty State ─── */
+  .empty-state {
+    text-align: center; padding: 40px 20px;
+    color: var(--gray-400);
+  }
+
+  .empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+  .empty-state p { font-size: 13px; }
+
+  /* ─── Submitter Row ─── */
+  .submitter-row {
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+
+  .submitter-row > div:first-child { flex: 1; }
+
+  /* ─── Image Preview ─── */
+  .img-preview {
+    max-width: 100%; max-height: 150px;
+    border-radius: 6px; border: 1px solid var(--gray-200);
+    display: block;
+  }
+
+  /* ─── Stats ─── */
+  .stats-row {
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+
+  .stat-card {
+    flex: 1; min-width: 80px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+  }
+
+  .stat-card .num {
+    font-size: 22px; font-weight: 700;
+    color: var(--primary);
+  }
+
+  .stat-card .label {
+    font-size: 11px; color: var(--gray-500);
+    margin-top: 2px;
+  }
+
+  /* ─── Steps indicator ─── */
+  .steps {
+    display: flex; gap: 0; margin-bottom: 4px;
+  }
+
+  .step {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--gray-400);
+    padding: 0 12px 0 0;
+  }
+
+  .step:first-child { padding-left: 0; }
+
+  .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--gray-200);
+    color: var(--gray-500);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+
+  .step.done .step-num { background: var(--success); color: white; }
+  .step.active .step-num { background: var(--primary); color: white; }
+  .step.done, .step.active { color: var(--gray-700); }
+
+  /* ─── Batch Cards ─── */
+  .batch-card {
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: white;
+    overflow: hidden;
+    transition: border-color .15s, box-shadow .15s;
+  }
+
+  .batch-card.selected {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(99,102,241,.15);
+  }
+
+  .batch-card-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-100);
+    cursor: pointer;
+  }
+
+  .batch-card-header:hover { background: var(--primary-light); }
+
+  .batch-card-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--primary); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+
+  .batch-card-title {
+    flex: 1; font-size: 13px; font-weight: 600; color: var(--gray-700);
+  }
+
+  .batch-card-body {
+    padding: 12px 14px;
+  }
+
+  .batch-card-body .result-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">📋</div>
+  <div class="title-block">
+    <h1>智能剪贴板提取工具</h1>
+    <p>多人协作 · 数据实时汇总</p>
+  </div>
+  <div class="header-badge">
+    <div class="dot-live"></div>
+    <span id="onlineCount">连接中…</span>
+  </div>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- ─── 侧边栏 ─── -->
+  <div class="sidebar">
+
+    <!-- 步骤指示 -->
+    <div class="steps">
+      <div class="step done" id="step1"><div class="step-num">1</div><span>API</span></div>
+      <div class="step" id="step2"><div class="step-num">2</div><span>模板</span></div>
+      <div class="step" id="step3"><div class="step-num">3</div><span>粘贴</span></div>
+      <div class="step" id="step4"><div class="step-num">4</div><span>提交</span></div>
+    </div>
+
+    <!-- AI 配置 -->
+    <div class="card">
+      <div class="card-header">
+        <span>🤖</span>
+        <h2>AI 配置</h2>
+        <span id="apiStatus" style="font-size:11px;color:var(--gray-400)">未配置</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px;">
+        <div>
+          <label>AI 提供商</label>
+          <select id="provider" onchange="onProviderChange()">
+            <option value="openai">OpenAI</option>
+            <option value="deepseek" selected>DeepSeek（推荐）</option>
+            <option value="qwen">通义千问</option>
+            <option value="zhipu">智谱AI</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div id="customUrlWrap" style="display:none;">
+          <label>自定义 API URL</label>
+          <input type="text" id="customUrl" placeholder="https://your-api.com/v1/chat/completions">
+        </div>
+        <div>
+          <label>模型名称</label>
+          <input type="text" id="model" value="deepseek-chat">
+        </div>
+        <div>
+          <label>API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-..." oninput="updateApiStatus()">
+        </div>
+      </div>
+    </div>
+
+    <!-- Excel 模板 -->
+    <div class="card">
+      <div class="card-header">
+        <span>📊</span>
+        <h2>Excel 模板</h2>
+      </div>
+      <div class="card-body">
+        <div id="templateSection">
+          <div class="upload-zone" id="templateDrop" onclick="document.getElementById('templateFile').click()" ondragover="onDragOver(event,'templateDrop')" ondragleave="onDragLeave('templateDrop')" ondrop="onTemplateDrop(event)">
+            <div class="icon">📂</div>
+            <p>点击或拖入 Excel 模板</p>
+            <small>第一行为列标题 · .xlsx / .xls</small>
+          </div>
+          <input type="file" id="templateFile" accept=".xlsx,.xls" style="display:none" onchange="uploadTemplate(this.files[0])">
+        </div>
+        <div id="templateLoaded" style="display:none;">
+          <div class="template-loaded">
+            <span>✅</span>
+            <div style="flex:1;min-width:0;">
+              <div id="templateName" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+              <div id="templateFieldCount" style="font-size:11px;margin-top:2px;"></div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="clearTemplate()">更换</button>
+          </div>
+          <div id="fieldsList" class="fields-list" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 提交者 -->
+    <div class="card">
+      <div class="card-header"><span>👤</span><h2>提交者信息</h2></div>
+      <div class="card-body">
+        <label>你的姓名（标记在记录上）</label>
+        <input type="text" id="submitter" placeholder="请输入你的姓名" oninput="saveSubmitter()">
+      </div>
+    </div>
+
+    <!-- 统计 -->
+    <div class="card">
+      <div class="card-header">
+        <span>📈</span>
+        <h2>汇总统计</h2>
+        <button class="btn btn-outline btn-sm" onclick="loadRecords()">🔄 刷新</button>
+      </div>
+      <div class="card-body">
+        <div class="stats-row">
+          <div class="stat-card"><div class="num" id="statTotal">0</div><div class="label">总记录</div></div>
+          <div class="stat-card"><div class="num" id="statToday">0</div><div class="label">今日提交</div></div>
+          <div class="stat-card"><div class="num" id="statMembers">0</div><div class="label">参与人数</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── 主区域 ─── -->
+  <div class="main">
+
+    <!-- 粘贴区 -->
+    <div class="card">
+      <div class="card-header">
+        <span>📌</span>
+        <h2>粘贴内容</h2>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--gray-600);margin:0;">
+            <input type="checkbox" id="batchMode" onchange="onBatchModeChange()" style="width:14px;height:14px;cursor:pointer;accent-color:var(--primary);">
+            批量模式
+          </label>
+          <button class="btn btn-outline btn-sm" onclick="clearPaste()">清空</button>
+          <button class="btn btn-primary btn-sm" id="extractBtn" onclick="runExtract()" disabled>
+            <span id="extractBtnText">✨ AI 提取</span>
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="paste-zone" id="pasteZone"
+          onpaste="onPaste(event)"
+          ondragover="onDragOver(event,'pasteZone')"
+          ondragleave="onDragLeave('pasteZone')"
+          ondrop="onFileDrop(event)"
+          tabindex="0">
+          <div id="pasteEmpty">
+            <div class="paste-icon">⌨️</div>
+            <div class="paste-hint">点击此处，然后按 <kbd>Ctrl+V</kbd> / <kbd>⌘V</kbd> 粘贴</div>
+            <div class="paste-hint" style="margin-top:4px;">或将文件拖入此处</div>
+          </div>
+          <div id="pasteContent" style="display:none;width:100%;">
+            <div class="paste-tag" id="pasteType">文本</div>
+            <div id="textPreview" class="content-preview"></div>
+            <img id="imgPreview" class="img-preview" style="display:none;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 结果区 + 汇总表 -->
+    <div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+      <div class="card-header">
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab('extract')">✨ 提取结果</div>
+          <div class="tab" onclick="switchTab('records')">📋 所有记录</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button class="btn btn-success btn-sm" id="submitBtn" onclick="submitRecord()" disabled>
+            <span id="submitBtnText">⬆ 提交到汇总</span>
+          </button>
+          <button class="btn btn-success btn-sm" id="submitBatchBtn" onclick="submitBatch()" disabled style="display:none;">
+            <span id="submitBatchBtnText">⬆ 批量提交</span>
+          </button>
+          <button class="btn btn-outline btn-sm" onclick="exportExcel()">⬇ 导出 Excel</button>
+        </div>
+      </div>
+
+      <!-- 提取结果 Tab -->
+      <div class="tab-content active" id="tab-extract" style="flex:1;min-height:0;overflow-y:auto;">
+        <div id="extractEmpty" class="empty-state">
+          <div class="icon">🔍</div>
+          <p>粘贴内容后点击「AI 提取」，识别结果会显示在这里</p>
+          <p style="margin-top:6px;font-size:12px;color:var(--gray-400);">开启「批量模式」可一次提取多条记录</p>
+        </div>
+
+        <!-- 单条结果 -->
+        <div id="extractResult" style="display:none;padding:16px;">
+          <div class="result-grid" id="resultGrid"></div>
+          <div id="extractAlert" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- 批量结果 -->
+        <div id="batchResult" style="display:none;padding:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span id="batchCount" style="font-size:13px;font-weight:600;color:var(--gray-700);"></span>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--gray-600);margin:0;margin-left:auto;">
+              <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:var(--primary);">
+              全选
+            </label>
+          </div>
+          <div id="batchCards" style="display:flex;flex-direction:column;gap:10px;"></div>
+        </div>
+      </div>
+
+      <!-- 所有记录 Tab -->
+      <div class="tab-content" id="tab-records" style="flex:1;min-height:0;overflow-y:auto;">
+        <div id="recordsEmpty" class="empty-state">
+          <div class="icon">📭</div>
+          <p>暂无记录，等待部门成员提交数据</p>
+        </div>
+        <div id="recordsTable" style="display:none;">
+          <div style="display:flex;justify-content:flex-end;padding:12px 16px 0;gap:8px;">
+            <button class="btn btn-outline btn-sm" onclick="loadRecords()">🔄 刷新</button>
+            <button class="btn btn-danger btn-sm" onclick="clearAllRecords()">🗑 清空全部</button>
+          </div>
+          <div class="records-wrap" style="padding:0 16px 16px;">
+            <table>
+              <thead>
+                <tr id="tableHead"></tr>
+              </thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ─── 状态 ────────────────────────────────────────────────────────────────────
+let state = {
+  pasteType: null,   // 'text' | 'image' | 'excel'
+  pasteRaw: null,    // 原始内容
+  pasteText: '',     // 文字化内容（送给AI）
+  extracted: null,   // AI 提取结果（单条）
+  batchResults: [],  // AI 提取结果（批量，数组）
+  headers: [],       // 模板列头
+  templateFile: null
+};
+
+// ─── 初始化 ──────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  // 恢复 submitter
+  const saved = localStorage.getItem('submitter');
+  if (saved) document.getElementById('submitter').value = saved;
+
+  // 恢复 API 配置
+  const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+  if (cfg.provider) document.getElementById('provider').value = cfg.provider;
+  if (cfg.model) document.getElementById('model').value = cfg.model;
+  if (cfg.apiKey) document.getElementById('apiKey').value = cfg.apiKey;
+  if (cfg.customUrl) document.getElementById('customUrl').value = cfg.customUrl;
+  onProviderChange();
+  updateApiStatus();
+
+  // 拉取服务端模板
+  fetchTemplate();
+  loadRecords();
+
+  // 定时刷新记录
+  setInterval(loadRecords, 30000);
+});
+
+// ─── API 配置 ────────────────────────────────────────────────────────────────
+const PROVIDERS = {
+  openai:    { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o' },
+  deepseek:  { url: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' },
+  qwen:      { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: 'qwen-vl-max' },
+  zhipu:     { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4v' },
+  anthropic: { url: 'https://api.anthropic.com/v1/messages', model: 'claude-3-5-sonnet-20241022' },
+  custom:    { url: '', model: '' }
+};
+
+function onProviderChange() {
+  const p = document.getElementById('provider').value;
+  const cfg = PROVIDERS[p] || {};
+  if (cfg.model) document.getElementById('model').value = cfg.model;
+  document.getElementById('customUrlWrap').style.display = p === 'custom' ? '' : 'none';
+  saveApiConfig();
+}
+
+function updateApiStatus() {
+  const key = document.getElementById('apiKey').value.trim();
+  const el = document.getElementById('apiStatus');
+  if (key) { el.textContent = '✅ 已配置'; el.style.color = 'var(--success)'; }
+  else { el.textContent = '未配置'; el.style.color = 'var(--gray-400)'; }
+  saveApiConfig();
+}
+
+function saveApiConfig() {
+  localStorage.setItem('apiConfig', JSON.stringify({
+    provider: document.getElementById('provider').value,
+    model: document.getElementById('model').value,
+    apiKey: document.getElementById('apiKey').value,
+    customUrl: document.getElementById('customUrl').value
+  }));
+}
+
+function saveSubmitter() {
+  localStorage.setItem('submitter', document.getElementById('submitter').value);
+}
+
+function getApiUrl() {
+  const p = document.getElementById('provider').value;
+  if (p === 'custom') return document.getElementById('customUrl').value.trim();
+  return PROVIDERS[p]?.url || '';
+}
+
+// ─── 模板管理 ────────────────────────────────────────────────────────────────
+async function fetchTemplate() {
+  try {
+    const res = await fetch('/api/template');
+    const data = await res.json();
+    if (data.headers && data.headers.length > 0) {
+      applyTemplate(data.filename, data.headers);
+    }
+  } catch(e) { /* ignore */ }
+}
+
+function applyTemplate(filename, headers) {
+  state.headers = headers;
+  document.getElementById('templateSection').style.display = 'none';
+  document.getElementById('templateLoaded').style.display = '';
+  document.getElementById('templateName').textContent = filename || '服务端模板';
+  document.getElementById('templateFieldCount').textContent = `${headers.length} 个字段`;
+
+  const fl = document.getElementById('fieldsList');
+  fl.innerHTML = headers.map(h => `<span class="field-tag">${h}</span>`).join('');
+
+  setStep(2, true);
+  updateExtractBtn();
+}
+
+async function uploadTemplate(file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  showToast('info', '正在上传模板…');
+  try {
+    const res = await fetch('/api/template', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) return showToast('error', '上传失败: ' + data.error);
+    applyTemplate(data.filename, data.headers);
+    showToast('success', `模板已上传，识别到 ${data.headers.length} 个字段`);
+  } catch(e) {
+    showToast('error', '上传失败: ' + e.message);
+  }
+}
+
+function clearTemplate() {
+  state.headers = [];
+  document.getElementById('templateSection').style.display = '';
+  document.getElementById('templateLoaded').style.display = 'none';
+}
+
+function onTemplateDrop(e) {
+  e.preventDefault(); onDragLeave('templateDrop');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadTemplate(file);
+}
+
+// ─── 粘贴 / 拖拽 ─────────────────────────────────────────────────────────────
+function onDragOver(e, id) {
+  e.preventDefault();
+  document.getElementById(id)?.classList.add('dragover');
+}
+
+function onDragLeave(id) {
+  document.getElementById(id)?.classList.remove('dragover');
+}
+
+function onFileDrop(e) {
+  e.preventDefault(); onDragLeave('pasteZone');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (file.name.match(/\.(xlsx|xls|csv)$/i)) loadExcelFile(file);
+  else if (file.type.startsWith('image/')) loadImageFile(file);
+  else showToast('error', '不支持的文件类型');
+}
+
+function onPaste(e) {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of items) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      loadImageFile(item.getAsFile()); return;
+    }
+  }
+
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file && file.name?.match(/\.(xlsx|xls|csv)$/i)) {
+        loadExcelFile(file); return;
+      }
+    }
+  }
+
+  const text = e.clipboardData.getData('text');
+  if (text) { loadText(text); return; }
+}
+
+function loadText(text) {
+  state.pasteType = 'text';
+  state.pasteRaw = text;
+  state.pasteText = text;
+  showPasteContent('文本', null, text);
+}
+
+function loadImageFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    state.pasteType = 'image';
+    state.pasteRaw = e.target.result;
+    state.pasteText = '[图片内容，将由视觉AI识别]';
+    showPasteContent('图片', e.target.result, null);
+  };
+  reader.readAsDataURL(file);
+}
+
+function loadExcelFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const textContent = rows.map(r => r.join('\t')).join('\n');
+      state.pasteType = 'excel';
+      state.pasteRaw = textContent;
+      state.pasteText = textContent;
+      showPasteContent('Excel', null, textContent.slice(0, 600) + (textContent.length > 600 ? '…' : ''));
+    } catch(err) {
+      showToast('error', '读取 Excel 失败: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showPasteContent(type, imgSrc, text) {
+  document.getElementById('pasteEmpty').style.display = 'none';
+  document.getElementById('pasteContent').style.display = '';
+  document.getElementById('pasteType').textContent = type;
+  document.getElementById('pasteZone').classList.add('has-content');
+
+  const imgEl = document.getElementById('imgPreview');
+  const textEl = document.getElementById('textPreview');
+
+  if (imgSrc) {
+    imgEl.src = imgSrc; imgEl.style.display = '';
+    textEl.style.display = 'none';
+  } else {
+    textEl.textContent = text; textEl.style.display = '';
+    imgEl.style.display = 'none';
+  }
+
+  setStep(3, true);
+  updateExtractBtn();
+}
+
+function clearPaste() {
+  state.pasteType = null; state.pasteRaw = null; state.pasteText = '';
+  state.extracted = null; state.batchResults = [];
+  document.getElementById('pasteEmpty').style.display = '';
+  document.getElementById('pasteContent').style.display = 'none';
+  document.getElementById('pasteZone').classList.remove('has-content');
+  document.getElementById('extractEmpty').style.display = '';
+  document.getElementById('extractResult').style.display = 'none';
+  document.getElementById('batchResult').style.display = 'none';
+  updateExtractBtn();
+  updateSubmitBtn();
+}
+
+// ─── 步骤 ────────────────────────────────────────────────────────────────────
+function setStep(n, done) {
+  const el = document.getElementById('step' + n);
+  if (done) el.classList.add('done'); else el.classList.add('active');
+}
+
+// ─── 按钮状态 ────────────────────────────────────────────────────────────────
+function updateExtractBtn() {
+  const ok = !!state.pasteText && state.headers.length > 0;
+  document.getElementById('extractBtn').disabled = !ok;
+}
+
+function updateSubmitBtn() {
+  const isBatch = document.getElementById('batchMode').checked;
+  document.getElementById('submitBtn').style.display = isBatch ? 'none' : '';
+  document.getElementById('submitBatchBtn').style.display = isBatch ? '' : 'none';
+
+  if (isBatch) {
+    const checked = document.querySelectorAll('.batch-row-check:checked').length;
+    document.getElementById('submitBatchBtn').disabled = checked === 0;
+    document.getElementById('submitBatchBtnText').textContent = checked > 0
+      ? `⬆ 批量提交 (${checked} 条)` : '⬆ 批量提交';
+  } else {
+    document.getElementById('submitBtn').disabled = !state.extracted;
+  }
+}
+
+function onBatchModeChange() {
+  updateSubmitBtn();
+  // 清空当前结果，切换模式时重置
+  state.extracted = null;
+  state.batchResults = [];
+  document.getElementById('extractEmpty').style.display = '';
+  document.getElementById('extractResult').style.display = 'none';
+  document.getElementById('batchResult').style.display = 'none';
+}
+
+// ─── AI 提取 ─────────────────────────────────────────────────────────────────
+async function runExtract() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) { showToast('error', '请先填写 API Key'); return; }
+  if (!state.headers.length) { showToast('error', '请先上传 Excel 模板'); return; }
+  if (!state.pasteText) { showToast('error', '请先粘贴内容'); return; }
+
+  const isBatch = document.getElementById('batchMode').checked;
+  const btn = document.getElementById('extractBtn');
+  const btnText = document.getElementById('extractBtnText');
+  btn.disabled = true;
+  btnText.innerHTML = '<span class="spinner"></span> 识别中…';
+
+  try {
+    if (isBatch) {
+      const results = await callAIBatch(apiKey);
+      state.batchResults = results;
+      renderBatchResult(results);
+    } else {
+      const result = await callAI(apiKey);
+      state.extracted = result;
+      renderResult(result);
+    }
+    updateSubmitBtn();
+    setStep(4, false);
+    showToast('success', isBatch ? `识别完成，共 ${state.batchResults.length} 条` : '识别完成！');
+  } catch(e) {
+    showToast('error', '识别失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btnText.innerHTML = '✨ AI 提取';
+    updateExtractBtn();
+  }
+}
+
+async function callAI(apiKey) {
+  const provider = document.getElementById('provider').value;
+  const model = document.getElementById('model').value.trim();
+  const url = getApiUrl();
+  const fieldsStr = state.headers.join('、');
+
+  const systemPrompt = `你是一个信息提取助手。从用户提供的内容中提取以下字段的值：${fieldsStr}。
+返回严格的 JSON 对象，格式：{"字段名": "值", ...}
+- 若某字段无法提取，值设为空字符串 ""
+- 只返回 JSON，不要任何解释或 markdown 代码块`;
+
+  let messages;
+
+  if (state.pasteType === 'image' && ['qwen','zhipu','openai'].includes(provider)) {
+    messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: [
+        { type: 'image_url', image_url: { url: state.pasteRaw } },
+        { type: 'text', text: '请从上面的图片中提取信息' }
+      ]}
+    ];
+  } else {
+    messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: state.pasteText }
+    ];
+  }
+
+  let body, headers;
+
+  if (provider === 'anthropic') {
+    body = { model, max_tokens: 1024, system: systemPrompt, messages: [messages[1]] };
+    headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+  } else {
+    body = { model, messages, temperature: 0.1, max_tokens: 1024 };
+    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+  }
+
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  let content;
+
+  if (provider === 'anthropic') {
+    content = data.content?.[0]?.text || '';
+  } else {
+    content = data.choices?.[0]?.message?.content || '';
+  }
+
+  // 清理 markdown code block
+  content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+
+  try {
+    return JSON.parse(content);
+  } catch(e) {
+    // 尝试提取 JSON 对象
+    const m = content.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error('AI 返回格式异常: ' + content.slice(0, 100));
+  }
+}
+
+// ─── 批量 AI 提取 ────────────────────────────────────────────────────────────
+async function callAIBatch(apiKey) {
+  const provider = document.getElementById('provider').value;
+  const model = document.getElementById('model').value.trim();
+  const url = getApiUrl();
+  const fieldsStr = state.headers.join('、');
+
+  const systemPrompt = `你是一个信息提取助手。用户提供的内容中包含多条记录（可能是多人信息、多行数据等）。
+请识别出所有条目，每条提取以下字段：${fieldsStr}。
+
+返回严格的 JSON 数组，格式：
+[
+  {"字段名1": "值", "字段名2": "值", ...},
+  {"字段名1": "值", "字段名2": "值", ...}
+]
+
+规则：
+- 每个对象代表一条记录
+- 若某字段无法提取，值设为空字符串 ""
+- 只返回 JSON 数组，不要任何解释或 markdown 代码块
+- 哪怕只识别到 1 条，也要返回数组格式`;
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: state.pasteText }
+  ];
+
+  let body, reqHeaders;
+
+  if (provider === 'anthropic') {
+    body = { model, max_tokens: 4096, system: systemPrompt, messages: [messages[1]] };
+    reqHeaders = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+  } else {
+    body = { model, messages, temperature: 0.1, max_tokens: 4096 };
+    reqHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+  }
+
+  const res = await fetch(url, { method: 'POST', headers: reqHeaders, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  let content = provider === 'anthropic'
+    ? (data.content?.[0]?.text || '')
+    : (data.choices?.[0]?.message?.content || '');
+
+  content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch(e) {
+    // 尝试提取 JSON 数组
+    const m = content.match(/\[[\s\S]*\]/);
+    if (m) parsed = JSON.parse(m[0]);
+    else {
+      // 尝试单个对象，包成数组
+      const m2 = content.match(/\{[\s\S]*\}/);
+      if (m2) parsed = [JSON.parse(m2[0])];
+      else throw new Error('AI 返回格式异常: ' + content.slice(0, 100));
+    }
+  }
+
+  if (!Array.isArray(parsed)) parsed = [parsed];
+  return parsed;
+}
+
+// ─── 渲染批量结果 ────────────────────────────────────────────────────────────
+function renderBatchResult(results) {
+  document.getElementById('extractEmpty').style.display = 'none';
+  document.getElementById('extractResult').style.display = 'none';
+  document.getElementById('batchResult').style.display = '';
+
+  document.getElementById('batchCount').textContent = `共识别 ${results.length} 条记录`;
+
+  const container = document.getElementById('batchCards');
+  container.innerHTML = results.map((row, i) => {
+    // 找一个有值的字段作为卡片标题
+    const titleField = state.headers.find(h => row[h]);
+    const title = titleField ? `${titleField}：${row[titleField]}` : `记录 ${i + 1}`;
+    return `
+    <div class="batch-card selected" id="batch-card-${i}">
+      <div class="batch-card-header" onclick="toggleBatchCard(${i})">
+        <input type="checkbox" class="batch-row-check" data-index="${i}" checked
+          style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary);flex-shrink:0;"
+          onclick="event.stopPropagation();onBatchCheckChange()">
+        <div class="batch-card-num">${i + 1}</div>
+        <div class="batch-card-title">${escHtml(title)}</div>
+        <span style="font-size:11px;color:var(--gray-400);">▾ 展开</span>
+      </div>
+      <div class="batch-card-body" id="batch-body-${i}">
+        <div class="result-grid">
+          ${state.headers.map(h => `
+            <div class="result-item">
+              <div class="key">${escHtml(h)}</div>
+              <div class="val">${escHtml(row[h] || '')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // 默认全选
+  document.getElementById('selectAll').checked = true;
+  onBatchCheckChange();
+}
+
+function toggleBatchCard(i) {
+  const body = document.getElementById('batch-body-' + i);
+  const card = document.getElementById('batch-card-' + i);
+  const arrow = card.querySelector('.batch-card-header span');
+  const isHidden = body.style.display === 'none';
+  body.style.display = isHidden ? '' : 'none';
+  arrow.textContent = isHidden ? '▾ 展开' : '▴ 收起';
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('selectAll').checked;
+  document.querySelectorAll('.batch-row-check').forEach(cb => {
+    cb.checked = checked;
+    const card = cb.closest('.batch-card');
+    if (card) card.classList.toggle('selected', checked);
+  });
+  onBatchCheckChange();
+}
+
+function onBatchCheckChange() {
+  document.querySelectorAll('.batch-row-check').forEach(cb => {
+    const card = cb.closest('.batch-card');
+    if (card) card.classList.toggle('selected', cb.checked);
+  });
+  // 更新全选状态
+  const all = document.querySelectorAll('.batch-row-check');
+  const checked = document.querySelectorAll('.batch-row-check:checked');
+  document.getElementById('selectAll').indeterminate = checked.length > 0 && checked.length < all.length;
+  document.getElementById('selectAll').checked = checked.length === all.length;
+  updateSubmitBtn();
+}
+
+// ─── 批量提交 ────────────────────────────────────────────────────────────────
+async function submitBatch() {
+  const submitter = document.getElementById('submitter').value.trim() || '匿名';
+  const checkedBoxes = [...document.querySelectorAll('.batch-row-check:checked')];
+  if (!checkedBoxes.length) { showToast('error', '请至少选择一条记录'); return; }
+
+  const btn = document.getElementById('submitBatchBtn');
+  const btnText = document.getElementById('submitBatchBtnText');
+  btn.disabled = true;
+  btnText.innerHTML = '<span class="spinner" style="border-top-color:white;border-color:rgba(255,255,255,.3);"></span> 提交中…';
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const cb of checkedBoxes) {
+    const index = parseInt(cb.dataset.index);
+    const rowData = state.batchResults[index];
+    try {
+      const res = await fetch('/api/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submitter,
+          data: rowData,
+          sourcePreview: state.pasteText.slice(0, 200)
+        })
+      });
+      const result = await res.json();
+      if (result.error) throw new Error(result.error);
+      successCount++;
+    } catch(e) {
+      failCount++;
+    }
+  }
+
+  btn.disabled = false;
+  btnText.textContent = '⬆ 批量提交';
+
+  if (successCount > 0) {
+    showToast('success', `✅ 成功提交 ${successCount} 条${failCount ? `，${failCount} 条失败` : ''}`);
+    setStep(4, true);
+    loadRecords();
+    switchTab('records');
+    state.batchResults = [];
+    clearPaste();
+  } else {
+    showToast('error', `提交失败，请重试`);
+  }
+  updateSubmitBtn();
+}
+
+// ─── 渲染提取结果 ────────────────────────────────────────────────────────────
+function renderResult(result) {
+  const grid = document.getElementById('resultGrid');
+  grid.innerHTML = state.headers.map(h => `
+    <div class="result-item">
+      <div class="key">${h}</div>
+      <div class="val">${escHtml(result[h] || '')}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('extractEmpty').style.display = 'none';
+  document.getElementById('extractResult').style.display = '';
+}
+
+// ─── 提交到后端 ──────────────────────────────────────────────────────────────
+async function submitRecord() {
+  if (!state.extracted) return;
+  const submitter = document.getElementById('submitter').value.trim() || '匿名';
+
+  const btn = document.getElementById('submitBtn');
+  const btnText = document.getElementById('submitBtnText');
+  btn.disabled = true;
+  btnText.innerHTML = '<span class="spinner" style="border-top-color:white;border-color:rgba(255,255,255,.3);"></span> 提交中…';
+
+  try {
+    const res = await fetch('/api/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submitter,
+        data: state.extracted,
+        sourcePreview: state.pasteText.slice(0, 200)
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    showToast('success', '✅ 已提交到汇总！');
+    setStep(4, true);
+    loadRecords();
+    switchTab('records');
+
+    // 清空当前提取结果
+    state.extracted = null;
+    clearPaste();
+  } catch(e) {
+    showToast('error', '提交失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btnText.innerHTML = '⬆ 提交到汇总';
+    updateSubmitBtn();
+  }
+}
+
+// ─── 加载记录 ────────────────────────────────────────────────────────────────
+async function loadRecords() {
+  try {
+    const res = await fetch('/api/records');
+    const records = await res.json();
+
+    updateStats(records);
+    renderTable(records);
+    document.getElementById('onlineCount').textContent = `${records.length} 条记录`;
+  } catch(e) { /* ignore */ }
+}
+
+function updateStats(records) {
+  document.getElementById('statTotal').textContent = records.length;
+
+  const today = new Date().toLocaleDateString('zh-CN');
+  const todayCount = records.filter(r => {
+    const d = new Date(r.created_at).toLocaleDateString('zh-CN');
+    return d === today;
+  }).length;
+  document.getElementById('statToday').textContent = todayCount;
+
+  const members = new Set(records.map(r => r.submitter).filter(Boolean));
+  document.getElementById('statMembers').textContent = members.size;
+}
+
+function renderTable(records) {
+  if (!records.length) {
+    document.getElementById('recordsEmpty').style.display = '';
+    document.getElementById('recordsTable').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('recordsEmpty').style.display = 'none';
+  document.getElementById('recordsTable').style.display = '';
+
+  const headers = state.headers.length ? state.headers : Object.keys(records[0]?.data || {});
+
+  // 表头
+  const thead = document.getElementById('tableHead');
+  thead.innerHTML = `<th>#</th><th>提交者</th>` +
+    headers.map(h => `<th>${escHtml(h)}</th>`).join('') +
+    `<th>提交时间</th><th>操作</th>`;
+
+  // 表体
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = records.map((r, i) => `
+    <tr>
+      <td style="color:var(--gray-400)">${i + 1}</td>
+      <td><span class="badge badge-blue">${escHtml(r.submitter || '匿名')}</span></td>
+      ${headers.map(h => `<td title="${escHtml(String(r.data[h] || ''))}">${escHtml(String(r.data[h] || ''))}</td>`).join('')}
+      <td style="color:var(--gray-400);font-size:11px;">${formatDate(r.created_at)}</td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="deleteRecord(${r.id})">删除</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteRecord(id) {
+  if (!confirm('确认删除这条记录？')) return;
+  await fetch('/api/records/' + id, { method: 'DELETE' });
+  loadRecords();
+  showToast('info', '已删除');
+}
+
+async function clearAllRecords() {
+  if (!confirm('确认清空所有记录？此操作不可恢复！')) return;
+  await fetch('/api/records', { method: 'DELETE' });
+  loadRecords();
+  showToast('info', '已清空所有记录');
+}
+
+// ─── 导出 Excel ──────────────────────────────────────────────────────────────
+function exportExcel() {
+  window.open('/api/export', '_blank');
+}
+
+// ─── Tab 切换 ────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['extract','records'][i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === 'tab-' + name);
+  });
+}
+
+// ─── 工具 ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatDate(s) {
+  if (!s) return '';
+  try {
+    const d = new Date(s);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  } catch { return s; }
+}
+
+let toastTimer;
+function showToast(type, msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove('show'); }, 3000);
+}
+</script>
+</body>
+</html>

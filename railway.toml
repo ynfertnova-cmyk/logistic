@@ -1,0 +1,11 @@
+# Railway 部署配置
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "node server.js"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "clipboard-extractor"
