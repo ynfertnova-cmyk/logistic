@@ -54,6 +54,9 @@ try {
       run: (...args) => {
         if (sql.includes('INSERT INTO records')) {
           memRecords.push({ id: idCounter++, submitter: args[0], data: args[1], source_preview: args[2], created_at: new Date().toISOString() });
+        } else if (sql.includes('UPDATE records SET data')) {
+          const rec = memRecords.find(r => r.id === args[1]);
+          if (rec) rec.data = args[0];
         } else if (sql.includes('UPDATE template')) {
           memTemplate = { filename: args[0], headers: args[1] };
         }
@@ -166,6 +169,26 @@ app.get('/api/records', (req, res) => {
     }));
     res.json(records);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── API: 更新单条记录字段 ───────────────────────────────────────────────────
+app.put('/api/records/:id', (req, res) => {
+  try {
+    const { data } = req.body;
+    if (!data || typeof data !== 'object') {
+      return res.status(400).json({ error: '数据格式错误' });
+    }
+    const result = db.prepare(
+      'UPDATE records SET data=? WHERE id=?'
+    ).run(JSON.stringify(data), req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: '记录不存在' });
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error('更新记录失败:', e);
     res.status(500).json({ error: e.message });
   }
 });

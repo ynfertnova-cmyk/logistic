@@ -371,6 +371,35 @@
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: var(--gray-50); }
 
+  /* ─── Editable cells ─── */
+  td.editable-cell {
+    cursor: default;
+    position: relative;
+    transition: background .1s;
+  }
+
+  td.editable-cell:hover {
+    background: #fefce8 !important;
+    outline: 1px dashed var(--warning);
+    outline-offset: -1px;
+  }
+
+  td.editable-cell:hover::after {
+    content: '✏️';
+    position: absolute;
+    top: 50%; right: 5px;
+    transform: translateY(-50%);
+    font-size: 10px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  td.editable-cell.editing {
+    background: var(--primary-light) !important;
+    outline: none;
+    padding: 4px 6px;
+  }
+
   .badge {
     display: inline-block; padding: 2px 8px;
     border-radius: 10px; font-size: 11px; font-weight: 500;
@@ -1446,16 +1475,92 @@ function renderTable(records) {
   // 表体
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = records.map((r, i) => `
-    <tr>
+    <tr data-id="${r.id}" data-record='${escAttr(JSON.stringify(r.data))}'>
       <td style="color:var(--gray-400)">${i + 1}</td>
       <td><span class="badge badge-blue">${escHtml(r.submitter || '匿名')}</span></td>
-      ${headers.map(h => `<td title="${escHtml(String(r.data[h] || ''))}">${escHtml(String(r.data[h] || ''))}</td>`).join('')}
+      ${headers.map(h => `
+        <td class="editable-cell"
+            title="双击编辑"
+            data-field="${escHtml(h)}"
+            data-record-id="${r.id}"
+            ondblclick="startCellEdit(this)">
+          <span class="cell-text">${escHtml(String(r.data[h] || ''))}</span>
+        </td>`).join('')}
       <td style="color:var(--gray-400);font-size:11px;">${formatDate(r.created_at)}</td>
       <td>
         <button class="btn btn-danger btn-sm" onclick="deleteRecord(${r.id})">删除</button>
       </td>
     </tr>
   `).join('');
+}
+
+// 辅助：转义 HTML 属性值（含单引号）
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ─── 内联编辑 ────────────────────────────────────────────────────────────────
+function startCellEdit(td) {
+  // 已在编辑中则跳过
+  if (td.classList.contains('editing')) return;
+  td.classList.add('editing');
+
+  const span = td.querySelector('.cell-text');
+  const oldVal = span.textContent;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = oldVal;
+  input.style.cssText = 'width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--primary);border-radius:5px;outline:none;box-shadow:0 0 0 2px rgba(99,102,241,.2);color:var(--gray-800);background:white;';
+
+  span.style.display = 'none';
+  td.appendChild(input);
+  input.focus();
+  input.select();
+
+  const finish = (save) => {
+    if (!td.classList.contains('editing')) return;
+    td.classList.remove('editing');
+    input.remove();
+    span.style.display = '';
+    if (save && input.value !== oldVal) {
+      span.textContent = input.value;
+      saveCellEdit(td, input.value);
+    }
+  };
+
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+}
+
+async function saveCellEdit(td, newVal) {
+  const recordId = td.dataset.recordId;
+  const field = td.dataset.field;
+
+  // 找到该行，收集所有字段的当前值
+  const tr = td.closest('tr');
+  const dataObj = JSON.parse(tr.dataset.record || '{}');
+  dataObj[field] = newVal;
+  // 更新行缓存
+  tr.dataset.record = JSON.stringify(dataObj);
+
+  try {
+    const res = await fetch('/api/records/' + recordId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: dataObj })
+    });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    showToast('success', '✏️ 已保存修改');
+  } catch(e) {
+    showToast('error', '保存失败: ' + e.message);
+    // 回滚显示旧值（重新拉取）
+    loadRecords();
+  }
 }
 
 async function deleteRecord(id) {
