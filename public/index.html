@@ -373,31 +373,33 @@
 
   /* ─── Editable cells ─── */
   td.editable-cell {
-    cursor: default;
-    position: relative;
-    transition: background .1s;
+    cursor: pointer;
   }
-
   td.editable-cell:hover {
     background: #fefce8 !important;
-    outline: 1px dashed var(--warning);
-    outline-offset: -1px;
+    box-shadow: inset 0 0 0 1px #f59e0b;
   }
-
-  td.editable-cell:hover::after {
-    content: '✏️';
-    position: absolute;
-    top: 50%; right: 5px;
-    transform: translateY(-50%);
-    font-size: 10px;
-    opacity: 0.5;
-    pointer-events: none;
-  }
-
   td.editable-cell.editing {
     background: var(--primary-light) !important;
+  }
+
+  /* 浮动编辑框 */
+  #floatEditWrap {
+    position: fixed;
+    z-index: 9998;
+    display: none;
+  }
+  #floatEditWrap input {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 2px solid var(--primary);
+    border-radius: 6px;
     outline: none;
-    padding: 4px 6px;
+    box-shadow: 0 2px 12px rgba(99,102,241,.25);
+    color: var(--gray-800);
+    background: white;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .badge {
@@ -797,6 +799,11 @@
 <!-- Toast -->
 <div id="toast"></div>
 
+<!-- 浮动编辑框（绝对定位，覆盖在 td 上方） -->
+<div id="floatEditWrap">
+  <input id="floatEditInput" type="text">
+</div>
+
 <script>
 // ─── 状态 ────────────────────────────────────────────────────────────────────
 let state = {
@@ -830,6 +837,24 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // 定时刷新记录
   setInterval(loadRecords, 30000);
+
+  // ── 浮动编辑框事件 ──
+  const floatInput = document.getElementById('floatEditInput');
+  floatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); commitFloatEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelFloatEdit(); }
+  });
+  floatInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (document.activeElement !== floatInput) commitFloatEdit();
+    }, 150);
+  });
+  document.addEventListener('mousedown', (e) => {
+    const wrap = document.getElementById('floatEditWrap');
+    if (wrap.style.display !== 'none' && !wrap.contains(e.target)) {
+      commitFloatEdit();
+    }
+  });
 });
 
 // ─── API 配置 ────────────────────────────────────────────────────────────────
@@ -973,10 +998,20 @@ function onPaste(e) {
 }
 
 function loadText(text) {
-  state.pasteType = 'text';
+  // 检测是否为表格格式（多行 + 制表符分隔）
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  const tabLines = lines.filter(l => l.includes('\t'));
+  const isTableLike = lines.length >= 2 && tabLines.length >= lines.length * 0.5;
+
+  state.pasteType = isTableLike ? 'excel' : 'text';
   state.pasteRaw = text;
   state.pasteText = text;
-  showPasteContent('文本', null, text);
+  showPasteContent(isTableLike ? '表格' : '文本', null, text.slice(0, 600) + (text.length > 600 ? '…' : ''));
+
+  // 如果是表格且开启了批量模式，自动提示
+  if (isTableLike && !document.getElementById('batchMode').checked) {
+    showToast('info', '检测到表格数据，建议开启「批量模式」');
+  }
 }
 
 function loadImageFile(file) {
@@ -986,6 +1021,10 @@ function loadImageFile(file) {
     state.pasteRaw = e.target.result;
     state.pasteText = '[图片内容，将由视觉AI识别]';
     showPasteContent('图片', e.target.result, null);
+    // 图片粘贴时，如果尚未开启批量模式，提示用户
+    if (!document.getElementById('batchMode').checked) {
+      showToast('info', '如果图片包含多行记录（如发货明细表），请开启「批量模式」再提取');
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -1187,9 +1226,16 @@ async function callAIBatch(apiKey) {
   const model = document.getElementById('model').value.trim();
   const url = getApiUrl();
   const fieldsStr = state.headers.join('、');
+  const isImage = state.pasteType === 'image';
 
-  const systemPrompt = `你是一个信息提取助手。用户提供的内容中包含多条记录（可能是多人信息、多行数据等）。
-请识别出所有条目，每条提取以下字段：${fieldsStr}。
+  const systemPrompt = `你是一个信息提取助手。用户提供的内容是一张${isImage ? '图片（发货明细表截图）' : 'Excel 表格或发货明细文本'}，包含多条独立记录。
+
+重要规则（必须严格遵守）：
+1. 表格中每一数据行都是一条完全独立的记录，不得合并
+2. 每行对应一个唯一的车号/车牌号码，必须逐行单独提取
+3. 从每行提取以下字段：${fieldsStr}
+4. 忽略表头行、合计行、空行等非数据行
+5. 绝对禁止把多个车号放在同一条记录里
 
 返回严格的 JSON 数组，格式：
 [
@@ -1198,20 +1244,47 @@ async function callAIBatch(apiKey) {
 ]
 
 规则：
-- 每个对象代表一条记录
+- 每个 JSON 对象代表一条记录（一行数据）
 - 若某字段无法提取，值设为空字符串 ""
 - 只返回 JSON 数组，不要任何解释或 markdown 代码块
 - 哪怕只识别到 1 条，也要返回数组格式`;
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: state.pasteText }
-  ];
+  let messages;
+
+  // 图片类型：构建多模态消息，让 AI 视觉识别图片并按行拆分
+  if (isImage && ['qwen', 'zhipu', 'openai'].includes(provider)) {
+    messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: [
+        { type: 'image_url', image_url: { url: state.pasteRaw } },
+        { type: 'text', text: '请识别图片中的表格，将每一行数据提取为一条独立记录，按要求返回 JSON 数组。' }
+      ]}
+    ];
+  } else if (isImage && provider === 'anthropic') {
+    // Anthropic 图片格式
+    const base64Data = state.pasteRaw.split(',')[1];
+    const mediaType = state.pasteRaw.match(/data:(image\/\w+);/)?.[1] || 'image/png';
+    messages = [
+      { role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
+        { type: 'text', text: '请识别图片中的表格，将每一行数据提取为一条独立记录，按要求返回 JSON 数组。' }
+      ]}
+    ];
+  } else {
+    messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: state.pasteText }
+    ];
+  }
 
   let body, reqHeaders;
 
   if (provider === 'anthropic') {
-    body = { model, max_tokens: 4096, system: systemPrompt, messages: [messages[1]] };
+    // Anthropic: system 独立，messages 只传 user 角色
+    // isImage + anthropic: messages = [{role:'user', content:[图片+文字]}]，index 0 就是 user
+    // 非 image: messages = [{role:'system',...}, {role:'user',...}]，user 在 index 1
+    const anthropicMessages = isImage ? [messages[0]] : [messages[1]];
+    body = { model, max_tokens: 4096, system: systemPrompt, messages: anthropicMessages };
     reqHeaders = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
   } else {
     body = { model, messages, temperature: 0.1, max_tokens: 4096 };
@@ -1429,10 +1502,13 @@ async function submitRecord() {
 }
 
 // ─── 加载记录 ────────────────────────────────────────────────────────────────
+let recordsCache = [];   // 全局缓存，供内联编辑读取
+
 async function loadRecords() {
   try {
     const res = await fetch('/api/records');
     const records = await res.json();
+    recordsCache = records;
 
     updateStats(records);
     renderTable(records);
@@ -1475,12 +1551,11 @@ function renderTable(records) {
   // 表体
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = records.map((r, i) => `
-    <tr data-id="${r.id}" data-record='${escAttr(JSON.stringify(r.data))}'>
+    <tr data-id="${r.id}">
       <td style="color:var(--gray-400)">${i + 1}</td>
       <td><span class="badge badge-blue">${escHtml(r.submitter || '匿名')}</span></td>
       ${headers.map(h => `
         <td class="editable-cell"
-            title="双击编辑"
             data-field="${escHtml(h)}"
             data-record-id="${r.id}"
             ondblclick="startCellEdit(this)">
@@ -1499,53 +1574,74 @@ function escAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// ─── 内联编辑 ────────────────────────────────────────────────────────────────
+// ─── 内联编辑（浮动 input 方案）─────────────────────────────────────────────
+let _editTd = null;
+
 function startCellEdit(td) {
-  // 已在编辑中则跳过
-  if (td.classList.contains('editing')) return;
+  if (_editTd) cancelFloatEdit();   // 先关闭上一个
+
+  _editTd = td;
   td.classList.add('editing');
 
-  const span = td.querySelector('.cell-text');
-  const oldVal = span.textContent;
+  const rect = td.getBoundingClientRect();
+  const wrap = document.getElementById('floatEditWrap');
+  const input = document.getElementById('floatEditInput');
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = oldVal;
-  input.style.cssText = 'width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--primary);border-radius:5px;outline:none;box-shadow:0 0 0 2px rgba(99,102,241,.2);color:var(--gray-800);background:white;';
+  // 定位到 td 正上方，宽度至少 120px
+  const w = Math.max(rect.width, 120);
+  wrap.style.cssText = `
+    position:fixed;
+    left:${rect.left}px;
+    top:${rect.top}px;
+    width:${w}px;
+    height:${rect.height}px;
+    display:flex;
+    align-items:center;
+    z-index:9998;
+  `;
 
-  span.style.display = 'none';
-  td.appendChild(input);
+  input.value = td.querySelector('.cell-text').textContent;
+  input.style.height = rect.height + 'px';
+  wrap.style.display = 'flex';
   input.focus();
   input.select();
+}
 
-  const finish = (save) => {
-    if (!td.classList.contains('editing')) return;
-    td.classList.remove('editing');
-    input.remove();
-    span.style.display = '';
-    if (save && input.value !== oldVal) {
-      span.textContent = input.value;
-      saveCellEdit(td, input.value);
-    }
-  };
+function commitFloatEdit() {
+  if (!_editTd) return;
+  const input = document.getElementById('floatEditInput');
+  const span = _editTd.querySelector('.cell-text');
+  const newVal = input.value;
+  const oldVal = span.textContent;
 
-  input.addEventListener('blur', () => finish(true));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-  });
+  hideFloatEdit();
+
+  if (newVal !== oldVal) {
+    span.textContent = newVal;
+    saveCellEdit(_editTd, newVal);
+  }
+  _editTd = null;
+}
+
+function cancelFloatEdit() {
+  hideFloatEdit();
+  _editTd = null;
+}
+
+function hideFloatEdit() {
+  if (_editTd) _editTd.classList.remove('editing');
+  document.getElementById('floatEditWrap').style.display = 'none';
 }
 
 async function saveCellEdit(td, newVal) {
-  const recordId = td.dataset.recordId;
+  const recordId = Number(td.dataset.recordId);
   const field = td.dataset.field;
 
-  // 找到该行，收集所有字段的当前值
-  const tr = td.closest('tr');
-  const dataObj = JSON.parse(tr.dataset.record || '{}');
-  dataObj[field] = newVal;
-  // 更新行缓存
-  tr.dataset.record = JSON.stringify(dataObj);
+  const cached = recordsCache.find(r => r.id === recordId);
+  if (!cached) { showToast('error', '找不到记录，请刷新'); return; }
+
+  const dataObj = Object.assign({}, cached.data, { [field]: newVal });
+  cached.data = dataObj;
 
   try {
     const res = await fetch('/api/records/' + recordId, {
@@ -1555,10 +1651,9 @@ async function saveCellEdit(td, newVal) {
     });
     const result = await res.json();
     if (result.error) throw new Error(result.error);
-    showToast('success', '✏️ 已保存修改');
+    showToast('success', '✏️ 已保存');
   } catch(e) {
     showToast('error', '保存失败: ' + e.message);
-    // 回滚显示旧值（重新拉取）
     loadRecords();
   }
 }
